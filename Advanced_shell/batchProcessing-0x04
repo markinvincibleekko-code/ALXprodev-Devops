@@ -1,16 +1,19 @@
 #!/bin/bash
 
-# Task 2 & 4: Batch Pokémon Data Retrieval with Error Handling and Retry Logic
-# Objective: Automate retrieval with robust error handling and retry mechanism
+# Task 5: Parallel Data Fetching
+# Objective: Speed up data retrieval using parallel processing
 
 # Configuration
 POKEMON_LIST=("bulbasaur" "ivysaur" "venusaur" "charmander" "charmeleon")
 OUTPUT_DIR="pokemon_data"
 ERROR_FILE="errors.txt"
 API_BASE_URL="https://pokeapi.co/api/v2/pokemon"
-DELAY_SECONDS=1  # Delay between requests to avoid rate limiting
-MAX_RETRIES=3    # Maximum number of retry attempts
-RETRY_DELAY=2    # Delay between retry attempts in seconds
+MAX_RETRIES=3
+RETRY_DELAY=2
+TIMEOUT=60  # Maximum time to wait for all processes
+
+# Array to store background process IDs
+declare -a PIDS=()
 
 # Function to log errors
 log_error() {
@@ -30,6 +33,29 @@ setup_directory() {
     fi
 }
 
+# Function to cleanup background processes on exit or interrupt
+cleanup_processes() {
+    echo ""
+    echo "Cleaning up background processes..."
+    
+    # Check if there are any running jobs
+    if jobs -p > /dev/null 2>&1; then
+        # Kill all background jobs
+        jobs -p | xargs -r kill 2>/dev/null
+        
+        # Wait a moment for processes to terminate
+        sleep 1
+        
+        # Force kill any remaining processes
+        jobs -p | xargs -r kill -9 2>/dev/null
+    fi
+    
+    echo "Cleanup completed."
+}
+
+# Set up trap to cleanup on script exit or interrupt
+trap cleanup_processes EXIT INT TERM
+
 # Function to fetch data for a single Pokemon with retry logic
 fetch_pokemon_with_retry() {
     local pokemon_name="$1"
@@ -42,12 +68,6 @@ fetch_pokemon_with_retry() {
     # Retry loop
     while [ ${attempt} -le ${MAX_RETRIES} ]; do
         # Make the API request with curl
-        # -s: silent mode
-        # -S: show errors
-        # -w: write out HTTP status code
-        # -o: output file
-        # --connect-timeout: connection timeout in seconds
-        # --max-time: maximum time for the entire operation
         http_code=$(curl -s -S -w "%{http_code}" -o "${output_file}" \
                     --connect-timeout 10 --max-time 30 "${api_url}" 2>&1)
         
@@ -89,7 +109,7 @@ fetch_pokemon_with_retry() {
         
         # If we reach here, the request failed
         if [ ${attempt} -lt ${MAX_RETRIES} ]; then
-            echo "Attempt ${attempt}/${MAX_RETRIES} failed. Retrying in ${RETRY_DELAY} seconds..."
+            echo "Attempt ${attempt}/${MAX_RETRIES} failed for ${pokemon_name}. Retrying in ${RETRY_DELAY} seconds..."
             sleep ${RETRY_DELAY}
         else
             # Final attempt failed
@@ -105,33 +125,100 @@ fetch_pokemon_with_retry() {
     return 1
 }
 
-# Function to process all Pokemon
-process_all_pokemon() {
+# Function to monitor and display running jobs
+monitor_jobs() {
+    local job_count=$(jobs -r | wc -l)
+    if [ ${job_count} -gt 0 ]; then
+        echo "Running background jobs: ${job_count}"
+        jobs -l
+    fi
+}
+
+# Function to process all Pokemon in parallel
+process_all_pokemon_parallel() {
+    echo "Starting parallel fetch for ${#POKEMON_LIST[@]} Pokémon..."
+    echo ""
+    
+    # Record start time
+    start_time=$(date +%s)
+    
+    # Launch all fetch operations in background
+    for pokemon in "${POKEMON_LIST[@]}"; do
+        fetch_pokemon_with_retry "${pokemon}" &
+        # Store the PID of the background process
+        PIDS+=($!)
+    done
+    
+    echo ""
+    echo "All fetch processes launched in parallel."
+    echo ""
+    
+    # Display running jobs
+    echo "Checking background jobs..."
+    jobs -l
+    echo ""
+    
+    echo "Waiting for all processes to complete..."
+    echo ""
+    
+    # Wait for all background processes to complete
     local success_count=0
     local fail_count=0
+    local wait_start=$(date +%s)
     
-    for pokemon in "${POKEMON_LIST[@]}"; do
-        if fetch_pokemon_with_retry "${pokemon}"; then
+    for pid in "${PIDS[@]}"; do
+        # Check if process is still running
+        if kill -0 ${pid} 2>/dev/null; then
+            # Wait for specific process with timeout check
+            wait ${pid} 2>/dev/null
+            exit_status=$?
+        else
+            # Process already finished
+            wait ${pid} 2>/dev/null
+            exit_status=$?
+        fi
+        
+        if [ ${exit_status} -eq 0 ]; then
             ((success_count++))
         else
             ((fail_count++))
         fi
         
-        # Add delay between requests to avoid rate limiting
-        # Skip delay after the last Pokemon
-        if [ "${pokemon}" != "${POKEMON_LIST[-1]}" ]; then
-            sleep ${DELAY_SECONDS}
+        # Check for timeout
+        local current_time=$(date +%s)
+        local elapsed=$((current_time - wait_start))
+        if [ ${elapsed} -gt ${TIMEOUT} ]; then
+            echo "WARNING: Timeout reached. Killing remaining processes..."
+            # Kill any remaining background jobs
+            jobs -p | xargs -r kill 2>/dev/null
+            break
         fi
     done
     
-    # Display summary if there were any failures
-    if [ ${fail_count} -gt 0 ]; then
-        echo ""
-        echo "Summary: ${success_count} successful, ${fail_count} failed"
-        echo "Check ${ERROR_FILE} for details"
+    # Verify no jobs are still running
+    if jobs -r > /dev/null 2>&1; then
+        echo "WARNING: Some jobs still running. Cleaning up..."
+        jobs -p | xargs -r kill 2>/dev/null
     fi
     
-    return 0
+    # Record end time
+    end_time=$(date +%s)
+    
+    # Calculate duration
+    duration=$((end_time - start_time))
+    
+    # Display summary
+    echo ""
+    echo "========================================="
+    echo "All processes completed!"
+    echo "Time taken: ${duration} seconds"
+    echo "Success: ${success_count} | Failed: ${fail_count}"
+    echo "========================================="
+    
+    # Show error log location if there were failures
+    if [ ${fail_count} -gt 0 ]; then
+        echo "Check ${ERROR_FILE} for error details"
+    fi
 }
 
 # Main execution
@@ -139,8 +226,8 @@ main() {
     # Setup output directory
     setup_directory
     
-    # Process all Pokemon
-    process_all_pokemon
+    # Process all Pokemon in parallel
+    process_all_pokemon_parallel
     
     exit 0
 }
