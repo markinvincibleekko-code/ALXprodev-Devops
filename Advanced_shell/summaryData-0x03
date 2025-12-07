@@ -1,0 +1,121 @@
+#!/bin/bash
+
+# Task 3: Summarize Pokémon Data
+# Objective: Create a CSV report and calculate averages
+
+# Configuration
+INPUT_DIR="pokemon_data"
+OUTPUT_CSV="pokemon_report.csv"
+ERROR_FILE="errors.txt"
+
+# Function to log errors
+log_error() {
+    local error_message="$1"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] ERROR: ${error_message}" >> "${ERROR_FILE}"
+}
+
+# Function to check if input directory exists
+check_input_directory() {
+    if [ ! -d "${INPUT_DIR}" ]; then
+        log_error "Input directory ${INPUT_DIR} not found"
+        echo "ERROR: ${INPUT_DIR} directory not found. Please run Task 2 first."
+        exit 1
+    fi
+    
+    # Check if there are any JSON files
+    json_count=$(ls -1 "${INPUT_DIR}"/*.json 2>/dev/null | wc -l)
+    if [ ${json_count} -eq 0 ]; then
+        log_error "No JSON files found in ${INPUT_DIR}"
+        echo "ERROR: No Pokemon data files found. Please run Task 2 first."
+        exit 1
+    fi
+}
+
+# Function to extract data from JSON files and create CSV
+generate_csv_report() {
+    # Write CSV header
+    echo "Name,Height (m),Weight (kg)" > "${OUTPUT_CSV}"
+    
+    # Process each JSON file in the directory
+    for json_file in "${INPUT_DIR}"/*.json; do
+        if [ -f "${json_file}" ]; then
+            # Verify it's valid JSON
+            if ! jq empty "${json_file}" 2>/dev/null; then
+                log_error "Invalid JSON in ${json_file}"
+                continue
+            fi
+            
+            # Extract data using jq
+            name=$(jq -r '.name' "${json_file}")
+            height=$(jq -r '.height' "${json_file}")
+            weight=$(jq -r '.weight' "${json_file}")
+            
+            # Validate extracted data
+            if [ -z "${name}" ] || [ "${name}" = "null" ]; then
+                log_error "Failed to extract data from ${json_file}"
+                continue
+            fi
+            
+            # Capitalize first letter of name using sed
+            name=$(echo "${name}" | sed 's/^\(.\)/\U\1/')
+            
+            # Convert height from decimeters to meters using awk
+            height_m=$(echo "${height}" | awk '{printf "%.1f", $1/10}')
+            
+            # Convert weight from hectograms to kilograms using awk
+            weight_kg=$(echo "${weight}" | awk '{printf "%.1f", $1/10}')
+            
+            # Append to CSV file
+            echo "${name},${height_m},${weight_kg}" >> "${OUTPUT_CSV}"
+        fi
+    done
+    
+    echo "CSV Report generated at: ${OUTPUT_CSV}"
+    echo ""
+}
+
+# Function to display CSV content
+display_csv() {
+    # Display the CSV content
+    cat "${OUTPUT_CSV}"
+    echo ""
+}
+
+# Function to calculate and display averages using awk
+calculate_averages() {
+    # Use awk to calculate average height and weight
+    # Skip the header line (NR>1)
+    # Sum up values and count entries
+    # Calculate and display averages
+    awk -F',' 'NR>1 {
+        sum_height += $2
+        sum_weight += $3
+        count++
+    }
+    END {
+        if (count > 0) {
+            avg_height = sum_height / count
+            avg_weight = sum_weight / count
+            printf "Average Height: %.2f m\n", avg_height
+            printf "Average Weight: %.2f kg\n", avg_weight
+        }
+    }' "${OUTPUT_CSV}"
+}
+
+# Main execution
+main() {
+    # Check if input directory and files exist
+    check_input_directory
+    
+    # Generate CSV report
+    generate_csv_report
+    
+    # Display CSV content
+    display_csv
+    
+    # Calculate and display averages
+    calculate_averages
+}
+
+# Run the main function
+main
