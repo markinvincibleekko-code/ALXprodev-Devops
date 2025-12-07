@@ -50,14 +50,14 @@ extract_pokemon_data() {
     
     # Convert height from decimeters to meters using awk
     # API returns height in decimeters (10 = 1.0m)
-    height_m=$(echo "${height}" | awk '{printf "%.1f", $1/10}')
+    formatted_height=$(echo "${height}" | awk '{printf "%.1f", $1/10}')
     
     # Convert weight from hectograms to kilograms using awk
     # API returns weight in hectograms (10 = 1kg)
-    weight_kg=$(echo "${weight}" | awk '{printf "%.0f", $1/10}')
+    formatted_weight=$(echo "${weight}" | awk '{printf "%.0f", $1/10}')
     
-    # Format and output the result
-    echo "${name} is of type ${type}, weighs ${weight_kg}kg, and is ${height_m}m tall."
+    # Format and output the result using the exact variable names required
+    echo "$name is of type $type, weighs ${formatted_weight}kg, and is ${formatted_height}m tall."
 }
 
 # Main execution
