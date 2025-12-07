@@ -1,0 +1,69 @@
+#!/bin/bash
+
+# Task 1: Extract Pokémon Data
+# Objective: Use jq, awk, sed to extract and format Pokemon data
+
+# Configuration
+INPUT_FILE="data.json"
+ERROR_FILE="errors.txt"
+
+# Function to log errors
+log_error() {
+    local error_message="$1"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] ERROR: ${error_message}" >> "${ERROR_FILE}"
+}
+
+# Function to extract and format Pokemon data
+extract_pokemon_data() {
+    # Check if input file exists
+    if [ ! -f "${INPUT_FILE}" ]; then
+        log_error "Input file ${INPUT_FILE} not found"
+        echo "ERROR: ${INPUT_FILE} not found. Please run Task 0 first."
+        exit 1
+    fi
+    
+    # Verify it's valid JSON
+    if ! jq empty "${INPUT_FILE}" 2>/dev/null; then
+        log_error "Invalid JSON in ${INPUT_FILE}"
+        echo "ERROR: Invalid JSON file."
+        exit 1
+    fi
+    
+    # Extract data using jq
+    name=$(jq -r '.name' "${INPUT_FILE}")
+    height=$(jq -r '.height' "${INPUT_FILE}")
+    weight=$(jq -r '.weight' "${INPUT_FILE}")
+    type=$(jq -r '.types[0].type.name' "${INPUT_FILE}")
+    
+    # Validate extracted data
+    if [ -z "${name}" ] || [ "${name}" = "null" ]; then
+        log_error "Failed to extract Pokemon name"
+        echo "ERROR: Could not extract Pokemon data"
+        exit 1
+    fi
+    
+    # Capitalize first letter of name using sed
+    name=$(echo "${name}" | sed 's/^\(.\)/\U\1/')
+    
+    # Capitalize first letter of type using sed
+    type=$(echo "${type}" | sed 's/^\(.\)/\U\1/')
+    
+    # Convert height from decimeters to meters using awk
+    # API returns height in decimeters (10 = 1.0m)
+    height_m=$(echo "${height}" | awk '{printf "%.1f", $1/10}')
+    
+    # Convert weight from hectograms to kilograms using awk
+    # API returns weight in hectograms (10 = 1kg)
+    weight_kg=$(echo "${weight}" | awk '{printf "%.0f", $1/10}')
+    
+    # Format and output the result
+    echo "${name} is of type ${type}, weighs ${weight_kg}kg, and is ${height_m}m tall."
+}
+
+# Main execution
+main() {
+    extract_pokemon_data
+}
+
+# Run the main function
+main
